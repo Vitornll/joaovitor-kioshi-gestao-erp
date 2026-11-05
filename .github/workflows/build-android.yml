@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
@@ -58,3 +61,11 @@ jobs:
           name: kioshi-gestao-android-apk
           path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Publicar APK em uma Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "android-${{ github.run_number }}" apps/mobile/android/app/build/outputs/apk/debug/*.apk \
+            --title "Kioshi Gestão — Android (build #${{ github.run_number }})" \
+            --notes "APK gerado automaticamente a partir do commit ${{ github.sha }}."

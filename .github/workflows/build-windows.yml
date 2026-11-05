@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -42,3 +45,12 @@ jobs:
           name: kioshi-gestao-windows-installer
           path: apps/desktop/release/*.exe
           retention-days: 30
+
+      - name: Publicar instalador em uma Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "windows-${{ github.run_number }}" apps/desktop/release/*.exe \
+            --title "Kioshi Gestão — Windows (build #${{ github.run_number }})" \
+            --notes "Instalador gerado automaticamente a partir do commit ${{ github.sha }}."
