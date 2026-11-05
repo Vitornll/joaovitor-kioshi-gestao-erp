@@ -1,6 +1,8 @@
 {
   "name": "kioshi-gestao-desktop",
   "version": "0.1.0",
+  "description": "Sistema de gestão da Kioshi Controle de Pragas",
+  "author": "Kioshi Controle de Pragas",
   "private": true,
   "main": "main.js",
   "scripts": {

@@ -17,7 +17,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      # Os runners ubuntu-latest já trazem o Android SDK (cmdline-tools,
+      # platform-tools e build-tools recentes) pré-instalado — não é
+      # necessário baixar nada extra aqui.
 
       - name: Instalar dependências do app web
         working-directory: apps/web
