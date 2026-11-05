@@ -1,0 +1,9 @@
+{
+  "appId": "com.kioshi.gestao",
+  "appName": "Kioshi Gestão",
+  "webDir": "www",
+  "backgroundColor": "#f5f4f6",
+  "android": {
+    "backgroundColor": "#f5f4f6"
+  }
+}

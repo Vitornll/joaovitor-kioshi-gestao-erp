@@ -1,0 +1,58 @@
+name: Build Android (.apk instalável)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+
+      - name: Instalar dependências do app web
+        working-directory: apps/web
+        run: npm install
+
+      - name: Build do app web (modo mobile)
+        working-directory: apps/web
+        run: npm run build:mobile
+
+      - name: Instalar dependências do Capacitor
+        working-directory: apps/mobile
+        run: npm install
+
+      - name: Copiar build para o projeto Capacitor
+        shell: bash
+        run: |
+          rm -rf apps/mobile/www
+          cp -r apps/web/dist/mobile apps/mobile/www
+
+      - name: Adicionar plataforma Android (se necessário)
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Build do APK (debug, instalável)
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug
+
+      - name: Upload do APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kioshi-gestao-android-apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 30

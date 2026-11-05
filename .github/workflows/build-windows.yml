@@ -1,0 +1,44 @@
+name: Build Windows (instalador .exe)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependências do app web
+        working-directory: apps/web
+        run: npm install
+
+      - name: Build do app web (modo desktop)
+        working-directory: apps/web
+        run: npm run build:desktop
+
+      - name: Copiar build para o projeto Electron
+        shell: bash
+        run: |
+          rm -rf apps/desktop/web-dist
+          cp -r apps/web/dist/desktop apps/desktop/web-dist
+
+      - name: Instalar dependências do Electron
+        working-directory: apps/desktop
+        run: npm install
+
+      - name: Gerar instalador Windows
+        working-directory: apps/desktop
+        run: npm run dist
+
+      - name: Upload do instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: kioshi-gestao-windows-installer
+          path: apps/desktop/release/*.exe
+          retention-days: 30
