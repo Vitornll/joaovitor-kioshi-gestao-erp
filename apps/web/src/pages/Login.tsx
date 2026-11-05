@@ -1,13 +1,19 @@
 import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import logo from '../assets/kioshi-logo.jpg';
 
 export default function Login() {
-  const { signIn } = useAuth();
+  const { session, loading: authLoading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Já autenticado (login recém-concluído ou sessão salva) — sai da tela de login.
+  if (!authLoading && session) {
+    return <Navigate to="/" replace />;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
