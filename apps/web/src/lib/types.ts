@@ -154,9 +154,44 @@ export interface Quote {
   state: string | null;
   issue_date: string;
   validity_date: string | null;
+  validity_days: number | null;
   service_description: string | null;
+  nature_of_services: string | null;
+  application_locations: string | null;
+  application_notes: string | null;
+  pests_combated: string | null;
+  payment_terms: string | null;
+  observations: string | null;
+  site_contact_name: string | null;
+  site_contact_phone: string | null;
   value: number | null;
   status: QuoteStatus;
+  pdf_url: string | null;
+}
+
+export interface QuoteItem {
+  id: string;
+  quote_id: string;
+  position: number;
+  service_name: string;
+  assistance_days: number | null;
+  qty: number;
+  unit_price: number;
+}
+
+export interface CompanySettings {
+  id: string;
+  name: string;
+  legal_name: string | null;
+  cnpj: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  city: string | null;
+  state: string | null;
+  address: string | null;
 }
 
 export type ChargeStatus = 'a_receber' | 'recebido' | 'vencido' | 'cancelado';

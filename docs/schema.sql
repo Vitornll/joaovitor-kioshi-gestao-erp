@@ -26,11 +26,15 @@ create type doc_kind as enum ('documento', 'treinamento', 'foto', 'outro');
 create table company_settings (
   id uuid primary key default gen_random_uuid(),
   name text not null default 'Kioshi Controle de Pragas',
+  legal_name text, -- razão social, usada nos documentos (orçamento, NF-e etc.)
   cnpj text,
   logo_url text,
   primary_color text default '#C8102E',
   phone text,
   email text,
+  website text,
+  city text default 'Vitória',
+  state text default 'ES',
   address text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -274,10 +278,31 @@ create table quotes (
   state text,
   issue_date date not null default current_date,
   validity_date date,
+  validity_days int default 60,
   service_description text,
+  nature_of_services text, -- "Natureza dos serviços"
+  application_locations text, -- "Locais de aplicação"
+  application_notes text, -- "Observações sobre a assistência"
+  pests_combated text, -- "Pragas combatidas"
+  payment_terms text default 'Após a execução do serviço.',
+  observations text,
+  site_contact_name text, -- "Contato no local"
+  site_contact_phone text,
   value numeric(12,2),
   status quote_status not null default 'aguardando',
   pdf_url text,
+  created_at timestamptz not null default now()
+);
+
+-- Itens da tabela "SERVIÇOS E VALORES" do orçamento (um orçamento tem vários).
+create table quote_items (
+  id uuid primary key default gen_random_uuid(),
+  quote_id uuid not null references quotes(id) on delete cascade,
+  position int not null default 0,
+  service_name text not null,
+  assistance_days int, -- dias de assistência/garantia incluídos no serviço
+  qty numeric(12,2) not null default 1,
+  unit_price numeric(12,2) not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -331,6 +356,7 @@ alter table stock_movements enable row level security;
 alter table compliance_licenses enable row level security;
 alter table audit_log enable row level security;
 alter table quotes enable row level security;
+alter table quote_items enable row level security;
 alter table sales_goals enable row level security;
 alter table charges enable row level security;
 
@@ -358,6 +384,7 @@ create policy staff_full_product_lots on product_lots for all using (current_rol
 create policy staff_full_compliance on compliance_licenses for all using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_audit on audit_log for select using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_quotes on quotes for all using (current_role_name() in ('diretoria','supervisor'));
+create policy staff_full_quote_items on quote_items for all using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_goals on sales_goals for all using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_charges on charges for all using (current_role_name() in ('diretoria','supervisor'));
 

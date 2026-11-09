@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { Badge, EmptyState } from '../components/ui';
-import type { Profile, UserRole } from '../lib/types';
+import type { CompanySettings, Profile, UserRole } from '../lib/types';
 
 const ROLE_INFO: Record<UserRole, { title: string; description: string }> = {
   diretoria: { title: 'Diretoria', description: 'Visão completa, financeiro e configurações.' },
@@ -18,15 +18,52 @@ export default function Configuracoes() {
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const [company, setCompany] = useState<CompanySettings | null>(null);
+  const [companyForm, setCompanyForm] = useState({
+    name: '', legal_name: '', cnpj: '', phone: '', email: '', website: '', city: '', state: '', address: '',
+  });
+  const [savingCompany, setSavingCompany] = useState(false);
+  const [companyMessage, setCompanyMessage] = useState<string | null>(null);
+
   useEffect(() => {
     load();
   }, []);
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from('profiles').select('*').order('full_name');
+    const [{ data }, { data: companyData }] = await Promise.all([
+      supabase.from('profiles').select('*').order('full_name'),
+      supabase.from('company_settings').select('*').limit(1).maybeSingle(),
+    ]);
     setProfiles(data ?? []);
+    if (companyData) {
+      setCompany(companyData as CompanySettings);
+      setCompanyForm({
+        name: companyData.name || '',
+        legal_name: companyData.legal_name || '',
+        cnpj: companyData.cnpj || '',
+        phone: companyData.phone || '',
+        email: companyData.email || '',
+        website: companyData.website || '',
+        city: companyData.city || '',
+        state: companyData.state || '',
+        address: companyData.address || '',
+      });
+    }
     setLoading(false);
+  }
+
+  async function saveCompany(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingCompany(true);
+    setCompanyMessage(null);
+    const { error } = await supabase
+      .from('company_settings')
+      .update({ ...companyForm, updated_at: new Date().toISOString() })
+      .eq('id', company?.id);
+    setCompanyMessage(error ? 'Erro: ' + error.message : 'Dados da empresa atualizados.');
+    setSavingCompany(false);
+    load();
   }
 
   async function createAccess(e: React.FormEvent) {
@@ -101,6 +138,67 @@ export default function Configuracoes() {
           </table>
         )}
       </div>
+
+      {isDiretoria && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)' }}>
+            <h3>Dados da empresa</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              Usados no rodapé e cabeçalho dos documentos gerados (orçamentos, e futuramente notas fiscais e boletos).
+            </p>
+          </div>
+          <form style={{ padding: 20 }} onSubmit={saveCompany}>
+            <div className="field-row">
+              <div className="field">
+                <label>Nome fantasia</label>
+                <input required value={companyForm.name} onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Razão social</label>
+                <input value={companyForm.legal_name} onChange={(e) => setCompanyForm({ ...companyForm, legal_name: e.target.value })} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>CNPJ</label>
+                <input value={companyForm.cnpj} onChange={(e) => setCompanyForm({ ...companyForm, cnpj: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Telefone(s)</label>
+                <input value={companyForm.phone} onChange={(e) => setCompanyForm({ ...companyForm, phone: e.target.value })} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>E-mail</label>
+                <input type="email" value={companyForm.email} onChange={(e) => setCompanyForm({ ...companyForm, email: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Site</label>
+                <input value={companyForm.website} onChange={(e) => setCompanyForm({ ...companyForm, website: e.target.value })} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Cidade</label>
+                <input value={companyForm.city} onChange={(e) => setCompanyForm({ ...companyForm, city: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>UF</label>
+                <input maxLength={2} value={companyForm.state} onChange={(e) => setCompanyForm({ ...companyForm, state: e.target.value.toUpperCase() })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Endereço</label>
+              <input value={companyForm.address} onChange={(e) => setCompanyForm({ ...companyForm, address: e.target.value })} />
+            </div>
+            {companyMessage && <p style={{ fontSize: 13, color: companyMessage.startsWith('Erro') ? 'var(--danger)' : 'var(--success)' }}>{companyMessage}</p>}
+            <button className="btn btn-primary" disabled={savingCompany}>
+              {savingCompany ? 'Salvando…' : 'Salvar dados da empresa'}
+            </button>
+          </form>
+        </div>
+      )}
 
       {isDiretoria && (
         <div className="card">
