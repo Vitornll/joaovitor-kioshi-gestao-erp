@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Modal, StatCard, Badge, EmptyState, formatDate } from '../components/ui';
-import type { Employee } from '../lib/types';
+import type { Employee, Profile } from '../lib/types';
 
 export default function RH() {
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [detail, setDetail] = useState<Employee | null>(null);
@@ -16,6 +17,7 @@ export default function RH() {
     cnh_number: '',
     cnh_validity: '',
     aso_validity: '',
+    profile_id: '',
   });
 
   useEffect(() => {
@@ -24,8 +26,12 @@ export default function RH() {
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from('employees').select('*').order('full_name');
+    const [{ data }, { data: profilesData }] = await Promise.all([
+      supabase.from('employees').select('*').order('full_name'),
+      supabase.from('profiles').select('*').order('full_name'),
+    ]);
     setEmployees(data ?? []);
+    setProfiles(profilesData ?? []);
     setLoading(false);
   }
 
@@ -43,10 +49,11 @@ export default function RH() {
       cnh_number: form.cnh_number || null,
       cnh_validity: form.cnh_validity || null,
       aso_validity: form.aso_validity || null,
+      profile_id: form.profile_id || null,
     });
     setSaving(false);
     setShowModal(false);
-    setForm({ full_name: '', cargo: '', admission_date: '', cnh_number: '', cnh_validity: '', aso_validity: '' });
+    setForm({ full_name: '', cargo: '', admission_date: '', cnh_number: '', cnh_validity: '', aso_validity: '', profile_id: '' });
     load();
   }
 
@@ -157,6 +164,20 @@ export default function RH() {
               <label>ASO — válido até</label>
               <input type="date" value={form.aso_validity} onChange={(e) => setForm({ ...form, aso_validity: e.target.value })} />
             </div>
+            <div className="field">
+              <label>Login no sistema (opcional)</label>
+              <select value={form.profile_id} onChange={(e) => setForm({ ...form, profile_id: e.target.value })}>
+                <option value="">Sem login vinculado</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.full_name} ({p.role})
+                  </option>
+                ))}
+              </select>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                Vincular o login do técnico permite que o produto informado na execução do serviço baixe automaticamente do estoque.
+              </p>
+            </div>
           </form>
         </Modal>
       )}
@@ -178,6 +199,10 @@ export default function RH() {
           <div style={{ marginTop: 14 }}>
             <label>ASO</label>
             <p style={{ margin: 0 }}>{formatDate(detail.aso_validity)}</p>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <label>Login no sistema</label>
+            <p style={{ margin: 0 }}>{profiles.find((p) => p.id === detail.profile_id)?.full_name || 'Sem login vinculado'}</p>
           </div>
           <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 18 }}>
             Documentos, treinamentos e fotos podem ser anexados em uma próxima etapa (upload de arquivos).

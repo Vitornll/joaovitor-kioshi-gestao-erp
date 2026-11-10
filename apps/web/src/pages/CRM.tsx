@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { Modal, StatCard, Badge, EmptyState, money, formatDate } from '../components/ui';
 import { downloadQuotePdf } from '../lib/quotePdf';
+import ScheduleModal from '../components/ScheduleModal';
 import type { Client, ClientAddress, CommercialStage, CompanySettings, Profile, Quote } from '../lib/types';
 
 const STAGES: { key: CommercialStage; label: string }[] = [
@@ -57,6 +58,7 @@ export default function CRM() {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [items, setItems] = useState<ItemForm[]>([{ ...EMPTY_ITEM }]);
+  const [acceptingQuote, setAcceptingQuote] = useState<Quote | null>(null);
 
   useEffect(() => {
     load();
@@ -254,9 +256,16 @@ export default function CRM() {
                     <Badge tone={QUOTE_TONE[q.status]}>{q.status.replace('_', ' ')}</Badge>
                   </td>
                   <td>
-                    <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 12.5 }} disabled={generatingId === q.id} onClick={() => handleGeneratePdf(q.id)}>
-                      {generatingId === q.id ? 'Gerando…' : 'Baixar PDF'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 12.5 }} disabled={generatingId === q.id} onClick={() => handleGeneratePdf(q.id)}>
+                        {generatingId === q.id ? 'Gerando…' : 'Baixar PDF'}
+                      </button>
+                      {q.status === 'aguardando' && q.client_id && (
+                        <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={() => setAcceptingQuote(q)}>
+                          Cliente aceitou →
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -390,6 +399,20 @@ export default function CRM() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {acceptingQuote && (
+        <ScheduleModal
+          initialClientId={acceptingQuote.client_id ?? undefined}
+          initialQuoteId={acceptingQuote.id}
+          initialNotes={acceptingQuote.nature_of_services ?? acceptingQuote.service_description ?? undefined}
+          lockClient
+          onClose={() => setAcceptingQuote(null)}
+          onSaved={() => {
+            setAcceptingQuote(null);
+            load();
+          }}
+        />
       )}
     </div>
   );

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Modal, StatCard, Badge, EmptyState, formatDate } from '../components/ui';
-import type { Client, ClientAddress, Contract, ServiceType } from '../lib/types';
+import { Modal, StatCard, Badge, EmptyState, formatDate, formatDateTime, money } from '../components/ui';
+import ScheduleModal from '../components/ScheduleModal';
+import { downloadQuotePdf } from '../lib/quotePdf';
+import type { Client, ClientAddress, Contract, Quote, ServiceOrder, ServiceType } from '../lib/types';
 
 type ClientWithExtras = Client & { client_addresses: ClientAddress[]; contracts: Contract[] };
 
@@ -11,6 +13,22 @@ const STAGE_LABEL: Record<string, string> = {
   contrato: 'Contrato',
   cliente_spot: 'Cliente spot',
   ex_cliente: 'Ex-cliente',
+};
+
+const QUOTE_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  aguardando: 'warning',
+  aprovado: 'success',
+  nao_aprovado: 'danger',
+  vencido: 'danger',
+};
+
+const ORDER_TONE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
+  pendente: 'warning',
+  confirmado: 'info',
+  em_rota: 'info',
+  em_execucao: 'info',
+  concluido: 'success',
+  cancelado: 'danger',
 };
 
 const emptyAddress = (): Partial<ClientAddress> => ({
@@ -33,7 +51,6 @@ export default function Clientes() {
   const [visitCount, setVisitCount] = useState(0);
   const [showClientModal, setShowClientModal] = useState(false);
   const [showContractModal, setShowContractModal] = useState<ClientWithExtras | null>(null);
-  const [detail, setDetail] = useState<ClientWithExtras | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({
@@ -57,6 +74,20 @@ export default function Clientes() {
     value: '',
     notes: '',
   });
+
+  // --- Painel de detalhe / edição do cliente -----------------------------
+  const [detail, setDetail] = useState<ClientWithExtras | null>(null);
+  const [detailForm, setDetailForm] = useState(form);
+  const [detailAddresses, setDetailAddresses] = useState<Partial<ClientAddress>[]>([]);
+  const [removedAddressIds, setRemovedAddressIds] = useState<string[]>([]);
+  const [savingDetail, setSavingDetail] = useState(false);
+  const [detailQuotes, setDetailQuotes] = useState<Quote[]>([]);
+  const [detailOrders, setDetailOrders] = useState<ServiceOrder[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [scheduleForClient, setScheduleForClient] = useState<ClientWithExtras | null>(null);
+  const [viewOrder, setViewOrder] = useState<ServiceOrder | null>(null);
+  const [viewPhotoUrls, setViewPhotoUrls] = useState<string[]>([]);
+  const [generatingQuoteId, setGeneratingQuoteId] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -154,6 +185,133 @@ export default function Clientes() {
     load();
   }
 
+  // --- Abrir / editar cadastro --------------------------------------------
+  async function openDetail(c: ClientWithExtras) {
+    setDetail(c);
+    setDetailForm({
+      kind: c.kind,
+      name: c.name,
+      cpf: c.cpf ?? '',
+      cnpj: c.cnpj ?? '',
+      contact_name: c.contact_name ?? '',
+      phone: c.phone ?? '',
+      email: c.email ?? '',
+      commercial_stage: c.commercial_stage,
+      notes: c.notes ?? '',
+    });
+    setDetailAddresses(c.client_addresses.length ? c.client_addresses.map((a) => ({ ...a })) : [emptyAddress()]);
+    setRemovedAddressIds([]);
+    setLoadingDetail(true);
+    const [{ data: quotes }, { data: orders }] = await Promise.all([
+      supabase.from('quotes').select('*').eq('client_id', c.id).order('issue_date', { ascending: false }),
+      supabase
+        .from('service_orders')
+        .select('*, service_types(*), client_addresses(*), service_order_execution(*)')
+        .eq('client_id', c.id)
+        .order('scheduled_at', { ascending: false }),
+    ]);
+    setDetailQuotes(quotes ?? []);
+    setDetailOrders((orders as ServiceOrder[]) ?? []);
+    setLoadingDetail(false);
+  }
+
+  function closeDetail() {
+    setDetail(null);
+    setDetailQuotes([]);
+    setDetailOrders([]);
+  }
+
+  async function saveDetail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!detail) return;
+    setSavingDetail(true);
+
+    await supabase
+      .from('clients')
+      .update({
+        kind: detailForm.kind,
+        name: detailForm.name,
+        cpf: detailForm.cpf || null,
+        cnpj: detailForm.cnpj || null,
+        contact_name: detailForm.contact_name || null,
+        phone: detailForm.phone || null,
+        email: detailForm.email || null,
+        commercial_stage: detailForm.commercial_stage,
+        notes: detailForm.notes || null,
+      })
+      .eq('id', detail.id);
+
+    if (removedAddressIds.length) {
+      await supabase.from('client_addresses').delete().in('id', removedAddressIds);
+    }
+    for (let idx = 0; idx < detailAddresses.length; idx++) {
+      const a = detailAddresses[idx];
+      if (!a.street && !a.neighborhood && !a.city && !a.label) continue;
+      if (a.id) {
+        await supabase
+          .from('client_addresses')
+          .update({
+            label: a.label || null,
+            street: a.street || null,
+            number: a.number || null,
+            complement: a.complement || null,
+            neighborhood: a.neighborhood || null,
+            city: a.city || null,
+            state: a.state || null,
+            zip: a.zip || null,
+            reference: a.reference || null,
+          })
+          .eq('id', a.id);
+      } else {
+        await supabase.from('client_addresses').insert({ ...a, client_id: detail.id, is_primary: idx === 0 });
+      }
+    }
+
+    setSavingDetail(false);
+    closeDetail();
+    load();
+  }
+
+  async function handleGenerateQuotePdf(quoteId: string) {
+    setGeneratingQuoteId(quoteId);
+    try {
+      const [{ data: quote }, { data: quoteItems }, { data: company }] = await Promise.all([
+        supabase.from('quotes').select('*').eq('id', quoteId).single(),
+        supabase.from('quote_items').select('*').eq('quote_id', quoteId).order('position'),
+        supabase.from('company_settings').select('*').limit(1).maybeSingle(),
+      ]);
+      if (!quote) return;
+      const { data: address } = detail
+        ? await supabase.from('client_addresses').select('*').eq('client_id', detail.id).order('is_primary', { ascending: false }).limit(1).maybeSingle()
+        : { data: null };
+      let responsible = null;
+      if (quote.responsible_profile_id) {
+        const { data: r } = await supabase.from('profiles').select('*').eq('id', quote.responsible_profile_id).single();
+        responsible = r;
+      }
+      downloadQuotePdf({ quote, items: quoteItems ?? [], client: detail, address: address ?? null, company: company ?? null, responsible });
+    } finally {
+      setGeneratingQuoteId(null);
+    }
+  }
+
+  async function openExecution(order: ServiceOrder) {
+    setViewOrder(order);
+    const exec = Array.isArray(order.service_order_execution) ? order.service_order_execution[0] : order.service_order_execution;
+    const photos = exec?.photos ?? [];
+    if (photos.length) {
+      const urls = await Promise.all(
+        photos.map(async (path) => {
+          const { data } = await supabase.storage.from('photos').createSignedUrl(path, 3600);
+          return data?.signedUrl ?? '';
+        })
+      );
+      setViewPhotoUrls(urls.filter(Boolean));
+    } else {
+      setViewPhotoUrls([]);
+    }
+  }
+
   return (
     <div>
       <div className="section-row">
@@ -216,7 +374,7 @@ export default function Clientes() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   <Badge tone="info">{STAGE_LABEL[c.commercial_stage]}</Badge>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setDetail(c)}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => openDetail(c)}>
                     Abrir cadastro
                   </button>
                 </div>
@@ -431,57 +589,262 @@ export default function Clientes() {
         <Modal
           eyebrow={detail.kind === 'pessoa_fisica' ? 'Pessoa física' : 'Pessoa jurídica'}
           title={detail.name}
-          onClose={() => setDetail(null)}
+          onClose={closeDetail}
+          wide
           footer={
-            <button className="btn btn-secondary" onClick={() => setDetail(null)}>
+            <>
+              <button className="btn btn-secondary" onClick={closeDetail}>
+                Fechar
+              </button>
+              <button className="btn btn-primary" form="detail-form" disabled={savingDetail}>
+                {savingDetail ? 'Salvando…' : 'Salvar alterações'}
+              </button>
+            </>
+          }
+        >
+          <form id="detail-form" onSubmit={saveDetail}>
+            <div className="field-row">
+              <div className="field">
+                <label>Etapa comercial</label>
+                <select value={detailForm.commercial_stage} onChange={(e) => setDetailForm({ ...detailForm, commercial_stage: e.target.value as Client['commercial_stage'] })}>
+                  {Object.entries(STAGE_LABEL).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Tipo de cadastro</label>
+                <select value={detailForm.kind} onChange={(e) => setDetailForm({ ...detailForm, kind: e.target.value as Client['kind'] })}>
+                  <option value="pessoa_fisica">Pessoa física</option>
+                  <option value="pessoa_juridica">Pessoa jurídica</option>
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <label>Nome completo ou razão social</label>
+              <input required value={detailForm.name} onChange={(e) => setDetailForm({ ...detailForm, name: e.target.value })} />
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>CPF</label>
+                <input value={detailForm.cpf} onChange={(e) => setDetailForm({ ...detailForm, cpf: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>CNPJ</label>
+                <input value={detailForm.cnpj} onChange={(e) => setDetailForm({ ...detailForm, cnpj: e.target.value })} />
+              </div>
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Contato responsável</label>
+                <input value={detailForm.contact_name} onChange={(e) => setDetailForm({ ...detailForm, contact_name: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Telefone</label>
+                <input value={detailForm.phone} onChange={(e) => setDetailForm({ ...detailForm, phone: e.target.value })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>E-mail</label>
+              <input type="email" value={detailForm.email} onChange={(e) => setDetailForm({ ...detailForm, email: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Observações</label>
+              <textarea rows={2} value={detailForm.notes} onChange={(e) => setDetailForm({ ...detailForm, notes: e.target.value })} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 6 }}>
+              <div className="section-row">
+                <strong style={{ fontSize: 14 }}>Endereços</strong>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailAddresses([...detailAddresses, emptyAddress()])}>
+                  + Endereço
+                </button>
+              </div>
+              {detailAddresses.map((addr, idx) => (
+                <div key={addr.id ?? idx} className="card" style={{ padding: 14, marginBottom: 10 }}>
+                  <div className="field-row">
+                    <div className="field">
+                      <label>Identificação</label>
+                      <input
+                        placeholder="Ex.: Matriz, residência"
+                        value={addr.label ?? ''}
+                        onChange={(e) => setDetailAddresses(detailAddresses.map((a, i) => (i === idx ? { ...a, label: e.target.value } : a)))}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Rua / avenida</label>
+                      <input value={addr.street ?? ''} onChange={(e) => setDetailAddresses(detailAddresses.map((a, i) => (i === idx ? { ...a, street: e.target.value } : a)))} />
+                    </div>
+                  </div>
+                  <div className="field-row">
+                    <div className="field">
+                      <label>Bairro</label>
+                      <input value={addr.neighborhood ?? ''} onChange={(e) => setDetailAddresses(detailAddresses.map((a, i) => (i === idx ? { ...a, neighborhood: e.target.value } : a)))} />
+                    </div>
+                    <div className="field">
+                      <label>Cidade / UF</label>
+                      <input
+                        placeholder="Cidade - UF"
+                        value={addr.city ?? ''}
+                        onChange={(e) => setDetailAddresses(detailAddresses.map((a, i) => (i === idx ? { ...a, city: e.target.value } : a)))}
+                      />
+                    </div>
+                  </div>
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label>Referência</label>
+                    <input value={addr.reference ?? ''} onChange={(e) => setDetailAddresses(detailAddresses.map((a, i) => (i === idx ? { ...a, reference: e.target.value } : a)))} />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      if (addr.id) setRemovedAddressIds((prev) => [...prev, addr.id as string]);
+                      setDetailAddresses(detailAddresses.filter((_, i) => i !== idx));
+                    }}
+                  >
+                    Remover endereço
+                  </button>
+                </div>
+              ))}
+            </div>
+          </form>
+
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 16 }}>
+            <div className="section-row">
+              <strong style={{ fontSize: 14 }}>Orçamentos</strong>
+            </div>
+            {loadingDetail ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+            ) : detailQuotes.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhum orçamento para este cliente.</p>
+            ) : (
+              detailQuotes.map((q) => (
+                <div key={q.id} className="card" style={{ padding: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>Orçamento {q.number}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      {formatDate(q.issue_date)} · {money(q.value)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <Badge tone={QUOTE_TONE[q.status]}>{q.status.replace('_', ' ')}</Badge>
+                    <button className="btn btn-secondary btn-sm" disabled={generatingQuoteId === q.id} onClick={() => handleGenerateQuotePdf(q.id)}>
+                      {generatingQuoteId === q.id ? 'Gerando…' : 'PDF'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 16 }}>
+            <div className="section-row">
+              <strong style={{ fontSize: 14 }}>Agendamentos e histórico de serviços</strong>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setScheduleForClient(detail)}>
+                + Novo agendamento
+              </button>
+            </div>
+            {loadingDetail ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+            ) : detailOrders.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhum agendamento para este cliente ainda.</p>
+            ) : (
+              detailOrders.map((o) => (
+                <div key={o.id} className="card" style={{ padding: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{formatDateTime(o.scheduled_at)}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      {o.service_types?.name || 'Serviço'} {o.quote_id && '· originado de orçamento'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <Badge tone={ORDER_TONE[o.status]}>{o.status.replace('_', ' ')}</Badge>
+                    {o.status === 'concluido' && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => openExecution(o)}>
+                        Ver execução
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {scheduleForClient && (
+        <ScheduleModal
+          initialClientId={scheduleForClient.id}
+          lockClient
+          onClose={() => setScheduleForClient(null)}
+          onSaved={() => {
+            setScheduleForClient(null);
+            if (detail) openDetail(detail);
+            load();
+          }}
+        />
+      )}
+
+      {viewOrder && (
+        <Modal
+          eyebrow="Histórico de atendimento"
+          title={formatDateTime(viewOrder.scheduled_at)}
+          onClose={() => setViewOrder(null)}
+          footer={
+            <button className="btn btn-secondary" onClick={() => setViewOrder(null)}>
               Fechar
             </button>
           }
         >
-          <div className="field-row">
-            <div>
-              <label>Documento</label>
-              <p style={{ margin: 0 }}>{detail.cpf || detail.cnpj || '—'}</p>
-            </div>
-            <div>
-              <label>Contato</label>
-              <p style={{ margin: 0 }}>{detail.contact_name || '—'}</p>
-            </div>
-          </div>
-          <div className="field-row" style={{ marginTop: 14 }}>
-            <div>
-              <label>Telefone</label>
-              <p style={{ margin: 0 }}>{detail.phone || '—'}</p>
-            </div>
-            <div>
-              <label>E-mail</label>
-              <p style={{ margin: 0 }}>{detail.email || '—'}</p>
-            </div>
-          </div>
-          <div style={{ marginTop: 18 }}>
-            <label>Endereços</label>
-            {detail.client_addresses.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Nenhum endereço cadastrado.</p>}
-            {detail.client_addresses.map((a) => (
-              <div key={a.id} className="card" style={{ padding: 12, marginBottom: 8, fontSize: 13.5 }}>
-                <strong>{a.label || 'Endereço'}</strong>
-                <div style={{ color: 'var(--text-muted)' }}>
-                  {[a.street, a.number, a.neighborhood, a.city, a.state].filter(Boolean).join(', ')}
+          {(() => {
+            const exec = Array.isArray(viewOrder.service_order_execution) ? viewOrder.service_order_execution[0] : viewOrder.service_order_execution;
+            if (!exec) return <p style={{ color: 'var(--text-muted)' }}>Sem registro de execução.</p>;
+            const minutes = exec.checked_in_at && exec.checked_out_at ? Math.round((new Date(exec.checked_out_at).getTime() - new Date(exec.checked_in_at).getTime()) / 60000) : null;
+            return (
+              <div>
+                <div className="field-row">
+                  <div>
+                    <label>Tempo de serviço</label>
+                    <p style={{ margin: 0 }}>{minutes != null ? `${minutes} min` : '—'}</p>
+                  </div>
+                  <div>
+                    <label>EPIs confirmados</label>
+                    <p style={{ margin: 0 }}>{exec.ppe_confirmed ? 'Sim' : 'Não informado'}</p>
+                  </div>
                 </div>
+                <div style={{ marginTop: 14 }}>
+                  <label>Produtos utilizados</label>
+                  {!exec.products_used?.length ? (
+                    <p style={{ color: 'var(--text-muted)', margin: 0 }}>Nenhum produto registrado.</p>
+                  ) : (
+                    exec.products_used.map((p, i) => (
+                      <div key={i} style={{ fontSize: 13.5 }}>
+                        {p.product_name} — {p.qty} {p.unit}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <label>Comentários do técnico</label>
+                  <p style={{ margin: 0 }}>{exec.execution_notes || '—'}</p>
+                </div>
+                {viewPhotoUrls.length > 0 && (
+                  <div style={{ marginTop: 14 }}>
+                    <label>Fotos do serviço</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 6 }}>
+                      {viewPhotoUrls.map((url, i) => (
+                        <a key={i} href={url} target="_blank" rel="noreferrer">
+                          <img src={url} style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 18 }}>
-            <label>Contratos</label>
-            {detail.contracts.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Nenhum contrato.</p>}
-            {detail.contracts.map((c) => (
-              <div key={c.id} className="card" style={{ padding: 12, marginBottom: 8, fontSize: 13.5, display: 'flex', justifyContent: 'space-between' }}>
-                <span>
-                  {c.recurrence} · desde {formatDate(c.start_date)}
-                </span>
-                <Badge tone={c.status === 'ativo' ? 'success' : 'neutral'}>{c.status}</Badge>
-              </div>
-            ))}
-          </div>
+            );
+          })()}
         </Modal>
       )}
     </div>

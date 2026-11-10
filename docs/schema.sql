@@ -124,6 +124,7 @@ create table service_orders (
   client_id uuid not null references clients(id) on delete restrict,
   address_id uuid references client_addresses(id),
   contract_id uuid references contracts(id),
+  quote_id uuid, -- origem: orçamento aceito pelo cliente (FK adicionada após a tabela "quotes", mais abaixo)
   service_type_id uuid references service_types(id),
   scheduled_at timestamptz not null,
   duration_minutes int default 60,
@@ -242,6 +243,26 @@ create table stock_movements (
   created_at timestamptz not null default now()
 );
 
+-- Mantém product_lots.quantity_central sempre coerente com os lançamentos
+-- (entrada soma, saída/uso em serviço/descarte/transferência subtrai).
+create or replace function adjust_product_lot_stock() returns trigger
+language plpgsql security definer as $$
+begin
+  if new.lot_id is not null then
+    if new.movement_type in ('entrada', 'retorno_central') then
+      update product_lots set quantity_central = quantity_central + new.quantity where id = new.lot_id;
+    elsif new.movement_type in ('saida', 'uso_em_servico', 'descarte', 'transferencia_bolsa') then
+      update product_lots set quantity_central = quantity_central - new.quantity where id = new.lot_id;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_adjust_product_lot_stock
+  after insert on stock_movements
+  for each row execute function adjust_product_lot_stock();
+
 -- ---------------------------------------------------------------------------
 -- CONFORMIDADE
 -- ---------------------------------------------------------------------------
@@ -306,6 +327,8 @@ create table quote_items (
   created_at timestamptz not null default now()
 );
 
+alter table service_orders add constraint service_orders_quote_id_fkey foreign key (quote_id) references quotes(id);
+
 create table sales_goals (
   id uuid primary key default gen_random_uuid(),
   profile_id uuid references profiles(id),
@@ -328,7 +351,8 @@ create table charges (
   received_date date,
   status charge_status not null default 'a_receber',
   reference text,
-  attachment_url text,
+  attachment_url text, -- boleto anexado manualmente
+  invoice_url text, -- nota fiscal anexada manualmente
   notes text,
   created_at timestamptz not null default now()
 );
@@ -381,6 +405,10 @@ create policy staff_full_vehicles on vehicles for all using (current_role_name()
 create policy staff_full_vehicle_documents on vehicle_documents for all using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_products on products for all using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_product_lots on product_lots for all using (current_role_name() in ('diretoria','supervisor'));
+-- Técnico só enxerga o catálogo (para registrar o que usou em serviço); quem
+-- cadastra produtos e lotes continua sendo só a diretoria/supervisor.
+create policy tecnico_select_products on products for select using (current_role_name() = 'tecnico');
+create policy tecnico_select_product_lots on product_lots for select using (current_role_name() = 'tecnico');
 create policy staff_full_compliance on compliance_licenses for all using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_audit on audit_log for select using (current_role_name() in ('diretoria','supervisor'));
 create policy staff_full_quotes on quotes for all using (current_role_name() in ('diretoria','supervisor'));

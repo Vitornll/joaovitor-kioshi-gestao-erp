@@ -36,6 +36,8 @@ export default function Financeiro() {
     reference: '',
     notes: '',
   });
+  const [boletoFile, setBoletoFile] = useState<File | null>(null);
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
 
   useEffect(() => {
     load();
@@ -62,9 +64,19 @@ export default function Financeiro() {
 
   const filtered = statusFilter === 'todas' ? charges : charges.filter((c) => c.status === statusFilter);
 
+  async function uploadDoc(file: File, prefix: string) {
+    const path = `charges/${Date.now()}-${prefix}-${file.name}`;
+    const { error } = await supabase.storage.from('documents').upload(path, file, { contentType: file.type });
+    return error ? null : path;
+  }
+
   async function saveCharge(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
+    const [attachment_url, invoice_url] = await Promise.all([
+      boletoFile ? uploadDoc(boletoFile, 'boleto') : Promise.resolve(null),
+      invoiceFile ? uploadDoc(invoiceFile, 'nf') : Promise.resolve(null),
+    ]);
     await supabase.from('charges').insert({
       client_id: form.client_id || null,
       service_order_id: form.service_order_id || null,
@@ -75,11 +87,20 @@ export default function Financeiro() {
       received_date: form.status === 'recebido' ? new Date().toISOString().slice(0, 10) : null,
       status: form.status,
       reference: form.reference || null,
+      attachment_url,
+      invoice_url,
       notes: form.notes || null,
     });
     setSaving(false);
     setShowModal(false);
+    setBoletoFile(null);
+    setInvoiceFile(null);
     load();
+  }
+
+  async function openDoc(path: string) {
+    const { data } = await supabase.storage.from('documents').createSignedUrl(path, 300);
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank');
   }
 
   async function markReceived(charge: Charge) {
@@ -134,6 +155,7 @@ export default function Financeiro() {
                 <th>Vencimento</th>
                 <th>Valor</th>
                 <th>Situação</th>
+                <th>Documentos</th>
                 <th></th>
               </tr>
             </thead>
@@ -149,6 +171,19 @@ export default function Financeiro() {
                   <td style={{ fontWeight: 600 }}>{money(c.value)}</td>
                   <td>
                     <Badge tone={STATUS_TONE[c.status]}>{STATUS_LABEL[c.status]}</Badge>
+                  </td>
+                  <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {c.attachment_url && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => openDoc(c.attachment_url!)}>
+                        Boleto
+                      </button>
+                    )}
+                    {c.invoice_url && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => openDoc(c.invoice_url!)}>
+                        NF
+                      </button>
+                    )}
+                    {!c.attachment_url && !c.invoice_url && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
                   </td>
                   <td>
                     {c.status === 'a_receber' && (
@@ -245,6 +280,19 @@ export default function Financeiro() {
               <label>Referência / identificação da transação (opcional)</label>
               <input placeholder="Ex.: identificador PIX, nosso número" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
             </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Anexar boleto (PDF)</label>
+                <input type="file" accept="application/pdf,image/*" onChange={(e) => setBoletoFile(e.target.files?.[0] ?? null)} />
+              </div>
+              <div className="field">
+                <label>Anexar nota fiscal (PDF)</label>
+                <input type="file" accept="application/pdf,image/*" onChange={(e) => setInvoiceFile(e.target.files?.[0] ?? null)} />
+              </div>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -6 }}>
+              Emissão de boleto e nota fiscal ainda é feita fora do sistema — anexe aqui os arquivos gerados para ficarem arquivados junto ao serviço do cliente.
+            </p>
             <div className="field">
               <label>Observações</label>
               <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

@@ -78,6 +78,7 @@ export interface ServiceOrder {
   client_id: string;
   address_id: string | null;
   contract_id: string | null;
+  quote_id: string | null;
   service_type_id: string | null;
   scheduled_at: string;
   duration_minutes: number;
@@ -87,6 +88,19 @@ export interface ServiceOrder {
   clients?: Client;
   client_addresses?: ClientAddress;
   service_types?: ServiceType;
+  service_order_execution?: ServiceOrderExecution | ServiceOrderExecution[];
+}
+
+export interface ServiceOrderExecution {
+  service_order_id: string;
+  checked_in_at: string | null;
+  checked_out_at: string | null;
+  ppe_confirmed: boolean;
+  signature_url: string | null;
+  photos: string[];
+  products_used: { product_id: string; product_name: string; lot_id: string | null; qty: number; unit: string }[];
+  execution_notes: string | null;
+  report_pdf_url: string | null;
 }
 
 export interface Employee {
@@ -207,6 +221,8 @@ export interface Charge {
   received_date: string | null;
   status: ChargeStatus;
   reference: string | null;
+  attachment_url: string | null;
+  invoice_url: string | null;
   notes: string | null;
   clients?: Client;
 }
