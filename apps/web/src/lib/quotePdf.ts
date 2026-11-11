@@ -1,6 +1,7 @@
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { KIOSHI_LOGO_BASE64 } from '../assets/logoBase64';
+import { ISO_SEAL_BASE64 } from '../assets/isoSealBase64';
 import { money, formatDate } from '../components/ui';
 import type { Quote, QuoteItem, Client, ClientAddress, CompanySettings, Profile } from './types';
 
@@ -128,19 +129,20 @@ export function buildQuoteDocDefinition(data: QuotePdfData): any {
     content: [
       {
         columns: [
-          { width: 70, image: KIOSHI_LOGO_BASE64, fit: [60, 60] },
+          { width: 100, image: KIOSHI_LOGO_BASE64, fit: [95, 95] },
           {
             width: '*',
             alignment: 'center',
+            margin: [0, 24, 0, 0],
             stack: [
               { text: 'ORÇAMENTO', bold: true, fontSize: 20, color: '#222222' },
               { text: 'PROPOSTA COMERCIAL | CONTROLE DE PRAGAS', fontSize: 8.5, color: '#888888', margin: [0, 2, 0, 0] },
             ],
           },
-          { width: 70, text: '' },
+          { width: 100, image: ISO_SEAL_BASE64, fit: [90, 90], alignment: 'right' },
         ],
       },
-      { canvas: [{ type: 'line', x1: 0, y1: 10, x2: 515.28, y2: 10, lineWidth: 0.5, lineColor: '#dddddd' }] },
+      { margin: [0, 10, 0, 0], canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515.28, y2: 0, lineWidth: 0.5, lineColor: '#dddddd' }] },
       {
         margin: [0, 12, 0, 0],
         columns: [
