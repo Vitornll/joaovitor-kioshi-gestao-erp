@@ -139,7 +139,7 @@ export function buildQuoteDocDefinition(data: QuotePdfData): any {
               { text: 'PROPOSTA COMERCIAL | CONTROLE DE PRAGAS', fontSize: 8.5, color: '#888888', margin: [0, 2, 0, 0] },
             ],
           },
-          { width: 100, image: ISO_SEAL_BASE64, fit: [90, 90], alignment: 'right' },
+          { width: 115, image: ISO_SEAL_BASE64, fit: [108, 108], alignment: 'right' },
         ],
       },
       { margin: [0, 10, 0, 0], canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515.28, y2: 0, lineWidth: 0.5, lineColor: '#dddddd' }] },
